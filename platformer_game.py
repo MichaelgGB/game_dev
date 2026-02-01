@@ -1,562 +1,1063 @@
+#!/usr/bin/env python3
 """
 Complete 2D Platformer Game
-Final Lab - SCS3411
-
 Features:
-- 3 Game States: Menu, Game Play, Game Over
-- Player animation during jumps, movement, and rest
-- Collision detection for coin collection
+- 3 Game States: Menu, Playing, Game Over
+- Animated player sprites (jumping, running, idle)
+- Collision detection with coins
 - Health system with enemies
-- Win condition when reaching the end
-- Multiple difficulty levels
+- Multiple levels with increasing difficulty
+- Smooth gameplay and particle effects
 """
-import arcade
+
+import pygame
 import random
+import math
+from enum import Enum
+
+# Initialize Pygame
+pygame.init()
 
 # Constants
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
-SCREEN_TITLE = "Platformer Adventure"
+SCREEN_WIDTH = 1000
+SCREEN_HEIGHT = 600
+FPS = 60
 
-# Scaling
-TILE_SCALING = 0.5
-PLAYER_SCALING = 0.5
-COIN_SCALING = 0.5
-ENEMY_SCALING = 0.5
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (220, 50, 50)
+GREEN = (50, 220, 50)
+BLUE = (50, 150, 220)
+YELLOW = (255, 215, 0)
+ORANGE = (255, 140, 0)
+PURPLE = (150, 50, 200)
+DARK_GRAY = (40, 40, 40)
+LIGHT_GRAY = (180, 180, 180)
+SKY_BLUE = (135, 206, 235)
+GOLD = (255, 215, 0)
+DARK_GREEN = (34, 139, 34)
+BROWN = (139, 69, 19)
 
-# Physics
-GRAVITY = 1.0
-PLAYER_JUMP_SPEED = 20
-PLAYER_MOVE_SPEED = 5
-ENEMY_MOVE_SPEED = 2
-
-# Game States
-MENU = 0
-GAME_PLAY = 1
-GAME_OVER = 2
-GAME_WIN = 3
-
-# Difficulty levels
-EASY = 0
-MEDIUM = 1
-HARD = 2
+class GameState(Enum):
+    MENU = 1
+    PLAYING = 2
+    GAME_OVER = 3
+    LEVEL_COMPLETE = 4
+    PAUSED = 5
 
 
-class MenuView:
-    """Menu screen"""
+class Particle:
+    """Particle effect for visual feedback"""
+    def __init__(self, x, y, color, velocity):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.vx, self.vy = velocity
+        self.life = 30
+        self.size = random.randint(2, 5)
     
-    def __init__(self, window):
-        self.window = window
-        self.selected_difficulty = EASY
-        
-    def draw(self):
-        arcade.draw_text(
-            "PLATFORMER ADVENTURE",
-            SCREEN_WIDTH / 2, SCREEN_HEIGHT - 150,
-            arcade.color.WHITE, 54,
-            anchor_x="center", bold=True
-        )
-        
-        arcade.draw_text(
-            "Select Difficulty:",
-            SCREEN_WIDTH / 2, SCREEN_HEIGHT - 250,
-            arcade.color.WHITE, 32,
-            anchor_x="center"
-        )
-        
-        difficulties = ["EASY", "MEDIUM", "HARD"]
-        colors = [arcade.color.GREEN, arcade.color.YELLOW, arcade.color.RED]
-        
-        for i, (diff, color) in enumerate(zip(difficulties, colors)):
-            y_pos = SCREEN_HEIGHT - 320 - (i * 60)
-            text_color = arcade.color.YELLOW if i == self.selected_difficulty else color
-            size = 36 if i == self.selected_difficulty else 28
-            
-            arcade.draw_text(
-                f"[{i + 1}] {diff}",
-                SCREEN_WIDTH / 2, y_pos,
-                text_color, size,
-                anchor_x="center", bold=(i == self.selected_difficulty)
-            )
-        
-        arcade.draw_text(
-            "Press ENTER to Start",
-            SCREEN_WIDTH / 2, 150,
-            arcade.color.WHITE, 28,
-            anchor_x="center"
-        )
-        
-        arcade.draw_text(
-            "Controls: Arrow Keys to Move, UP to Jump",
-            SCREEN_WIDTH / 2, 80,
-            arcade.color.LIGHT_GRAY, 18,
-            anchor_x="center"
-        )
-
-
-class GameOverView:
-    """Game Over screen"""
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.3  # Gravity
+        self.life -= 1
+        self.size = max(1, self.size - 0.1)
     
-    def __init__(self, window, won=False, score=0, health=0):
-        self.window = window
-        self.won = won
-        self.score = score
-        self.health = health
-        
-    def draw(self):
-        if self.won:
-            arcade.draw_text(
-                "YOU WIN!",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT - 150,
-                arcade.color.YELLOW, 64,
-                anchor_x="center", bold=True
-            )
-            arcade.draw_text(
-                "Congratulations! You collected all coins and reached the end!",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT - 230,
-                arcade.color.WHITE, 24,
-                anchor_x="center"
-            )
-        else:
-            arcade.draw_text(
-                "GAME OVER",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT - 150,
-                arcade.color.RED, 64,
-                anchor_x="center", bold=True
-            )
-            arcade.draw_text(
-                "You ran out of health!",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT - 230,
-                arcade.color.WHITE, 24,
-                anchor_x="center"
-            )
-        
-        arcade.draw_text(
-            f"Final Score: {self.score}",
-            SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2,
-            arcade.color.WHITE, 36,
-            anchor_x="center"
-        )
-        
-        arcade.draw_text(
-            f"Final Health: {self.health}",
-            SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 60,
-            arcade.color.WHITE, 36,
-            anchor_x="center"
-        )
-        
-        arcade.draw_text(
-            "Press R to Restart or ESC for Menu",
-            SCREEN_WIDTH / 2, 150,
-            arcade.color.WHITE, 28,
-            anchor_x="center"
-        )
+    def draw(self, screen):
+        if self.life > 0:
+            alpha = int((self.life / 30) * 255)
+            s = pygame.Surface((self.size * 2, self.size * 2), pygame.SRCALPHA)
+            color_with_alpha = (*self.color, alpha)
+            pygame.draw.circle(s, color_with_alpha, (self.size, self.size), self.size)
+            screen.blit(s, (int(self.x - self.size), int(self.y - self.size)))
 
 
-class GamePlayView:
-    """Main game play"""
-    
-    def __init__(self, window, difficulty=EASY):
-        self.window = window
-        self.difficulty = difficulty
-        
-        # Game state
-        self.player_health = 100
+class Player:
+    """Player character with animations"""
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.width = 30
+        self.height = 40
+        self.vel_x = 0
+        self.vel_y = 0
+        self.speed = 5
+        self.jump_power = 15
+        self.gravity = 0.8
+        self.on_ground = False
+        self.health = 100
+        self.max_health = 100
         self.score = 0
-        self.total_coins = 0
-        self.coins_collected = 0
+        self.facing_right = True
+        self.animation_frame = 0
+        self.animation_timer = 0
+        self.state = "idle"  # idle, run, jump
+        self.invincible = 0  # Invincibility frames after hit
         
-        # Sprite lists
-        self.player_list = arcade.SpriteList()
-        self.wall_list = arcade.SpriteList(use_spatial_hash=True)
-        self.coin_list = arcade.SpriteList()
-        self.enemy_list = arcade.SpriteList()
-        self.end_goal_list = arcade.SpriteList()
+        # Improved jump mechanics
+        self.coyote_time = 0  # Frames since leaving ground
+        self.coyote_time_max = 6  # Allow jump for 6 frames after leaving platform
+        self.jump_buffer = 0  # Frames since jump was pressed
+        self.jump_buffer_max = 6  # Buffer jump input for 6 frames
+        self.is_jumping = False  # Track if currently in a jump
+        self.jump_cut_multiplier = 0.5  # Velocity multiplier when releasing jump early
         
-        # Camera for scrolling (Arcade 3.x+)
-        self.camera = arcade.camera.Camera2D()
-        self.gui_camera = arcade.camera.Camera2D()
+        # Cache rect for performance
+        self.rect = pygame.Rect(x, y, self.width, self.height)
         
-        # Player setup
-        # ANIMATION PLACEHOLDER: Replace with animated sprite
-        self.player_sprite = arcade.Sprite(
-            ":resources:images/animated_characters/female_adventurer/femaleAdventurer_idle.png",
-            PLAYER_SCALING
-        )
-        self.player_sprite.center_x = 128
-        self.player_sprite.center_y = 256
-        self.player_list.append(self.player_sprite)
+    def update(self, platforms):
+        # Update animation
+        self.animation_timer += 1
+        if self.animation_timer > 8:
+            self.animation_timer = 0
+            self.animation_frame = (self.animation_frame + 1) % 4
         
-        # Physics engine
-        self.physics_engine = None
+        # Apply gravity
+        self.vel_y += self.gravity
         
-        # Setup level
-        self.setup_level()
+        # Limit fall speed
+        if self.vel_y > 20:
+            self.vel_y = 20
         
-        # Invincibility frames after taking damage
-        self.invincible_timer = 0
+        # Update position
+        self.x += self.vel_x
+        self.y += self.vel_y
         
-    def setup_level(self):
-        """Create the game level based on difficulty"""
+        # Update cached rect
+        self.rect.x = self.x
+        self.rect.y = self.y
         
-        # Adjust difficulty parameters
-        if self.difficulty == EASY:
-            level_length = 3000
-            num_enemies = 3
-            num_coins = 15
-            self.player_health = 100
-        elif self.difficulty == MEDIUM:
-            level_length = 5000
-            num_enemies = 6
-            num_coins = 25
-            self.player_health = 80
-        else:  # HARD
-            level_length = 10000
-            num_enemies = 20
-            num_coins = 50
-            self.player_health = 50
+        # Track if we were on ground before collision check
+        was_on_ground = self.on_ground
         
-        # Create ground
-        for x in range(0, level_length, 64):
-            wall = arcade.Sprite(
-                ":resources:images/tiles/grassMid.png",
-                TILE_SCALING
-            )
-            wall.center_x = x
-            wall.center_y = 32
-            self.wall_list.append(wall)
+        # Check platform collisions
+        self.on_ground = False
         
-        # Create platforms at various heights
-        platform_positions = [
-            (400, 150), (600, 250), (900, 180), (1200, 280),
-            (1500, 200), (1800, 300), (2100, 220), (2400, 180),
-            (2700, 260), (3000, 200), (3300, 280)
-        ]
+        for platform in platforms:
+            if self.rect.colliderect(platform.rect):
+                # Collision from top
+                if self.vel_y > 0 and self.rect.bottom <= platform.rect.top + 20:
+                    self.y = platform.rect.top - self.height
+                    self.vel_y = 0
+                    self.on_ground = True
+                    self.is_jumping = False
+                # Collision from bottom
+                elif self.vel_y < 0 and self.rect.top >= platform.rect.bottom - 20:
+                    self.y = platform.rect.bottom
+                    self.vel_y = 0
+                # Collision from sides
+                else:
+                    if self.vel_x > 0:  # Moving right
+                        self.x = platform.rect.left - self.width
+                    elif self.vel_x < 0:  # Moving left
+                        self.x = platform.rect.right
+                    self.vel_x = 0
+                # Update rect after collision resolution
+                self.rect.x = self.x
+                self.rect.y = self.y
         
-        # Adjust number of platforms based on difficulty
-        num_platforms = min(len(platform_positions), level_length // 300)
+        # Coyote time - allow jumping shortly after leaving platform
+        if self.on_ground:
+            self.coyote_time = self.coyote_time_max
+        elif was_on_ground and not self.on_ground and not self.is_jumping:
+            # Just left the ground without jumping
+            pass  # coyote_time will decrement below
         
-        for i in range(num_platforms):
-            x, y = platform_positions[i % len(platform_positions)]
-            x = x + (i // len(platform_positions)) * 300
-            
-            # Create platform (3 blocks wide)
-            for offset in range(-64, 129, 64):
-                if x + offset < level_length:
-                    platform = arcade.Sprite(
-                        ":resources:images/tiles/grassMid.png",
-                        TILE_SCALING
-                    )
-                    platform.center_x = x + offset
-                    platform.center_y = y
-                    self.wall_list.append(platform)
+        if self.coyote_time > 0:
+            self.coyote_time -= 1
         
-        # Add coins
-        self.total_coins = num_coins
-        for i in range(num_coins):
-            coin = arcade.Sprite(
-                ":resources:images/items/coinGold.png",
-                COIN_SCALING
-            )
-            # Distribute coins throughout the level, placed above ground/platforms
-            coin.center_x = random.randint(200, level_length - 200)
-            coin.center_y = random.randint(150, 350)
-            self.coin_list.append(coin)
+        # Jump buffer countdown
+        if self.jump_buffer > 0:
+            self.jump_buffer -= 1
+            # Try to execute buffered jump
+            if self.can_jump():
+                self._execute_jump()
         
-        # Add enemies
-        for i in range(num_enemies):
-            enemy = arcade.Sprite(
-                ":resources:images/enemies/slimeBlue.png",
-                ENEMY_SCALING
-            )
-            enemy.center_x = random.randint(300, level_length - 300)
-            enemy.center_y = 96
-            enemy.change_x = ENEMY_MOVE_SPEED * random.choice([-1, 1])
-            self.enemy_list.append(enemy)
+        # Update state
+        if not self.on_ground:
+            self.state = "jump"
+        elif abs(self.vel_x) > 0:
+            self.state = "run"
+        else:
+            self.state = "idle"
         
-        # Add end goal
-        end_goal = arcade.Sprite(
-            ":resources:images/items/flagGreen2.png",
-            TILE_SCALING * 1.5
-        )
-        end_goal.center_x = level_length - 100
-        end_goal.center_y = 128
-        self.end_goal_list.append(end_goal)
+        # Decrease invincibility
+        if self.invincible > 0:
+            self.invincible -= 1
         
-        # Setup physics
-        self.physics_engine = arcade.PhysicsEnginePlatformer(
-            self.player_sprite,
-            walls=self.wall_list,
-            gravity_constant=GRAVITY
-        )
+        # Keep player in bounds
+        if self.x < 0:
+            self.x = 0
+        if self.y > SCREEN_HEIGHT:
+            self.health = 0
     
-    def update(self, delta_time):
-        """Update game logic"""
+    def can_jump(self):
+        """Check if player can jump (on ground or within coyote time)"""
+        return self.on_ground or self.coyote_time > 0
+    
+    def _execute_jump(self):
+        """Actually perform the jump"""
+        self.vel_y = -self.jump_power
+        self.is_jumping = True
+        self.coyote_time = 0
+        self.jump_buffer = 0
+    
+    def jump(self):
+        """Request a jump - uses coyote time and jump buffering"""
+        if self.can_jump():
+            self._execute_jump()
+        else:
+            # Buffer the jump input
+            self.jump_buffer = self.jump_buffer_max
+    
+    def release_jump(self):
+        """Called when jump key is released - enables variable jump height"""
+        if self.is_jumping and self.vel_y < 0:
+            self.vel_y *= self.jump_cut_multiplier
+    
+    def move_left(self):
+        self.vel_x = -self.speed
+        self.facing_right = False
+    
+    def move_right(self):
+        self.vel_x = self.speed
+        self.facing_right = True
+    
+    def stop_horizontal(self):
+        self.vel_x = 0
+    
+    def take_damage(self, amount):
+        if self.invincible == 0:
+            self.health -= amount
+            self.invincible = 60  # 1 second of invincibility
+            if self.health < 0:
+                self.health = 0
+    
+    def draw(self, screen, camera_x):
+        screen_x = self.x - camera_x
         
-        # Update invincibility timer
-        if self.invincible_timer > 0:
-            self.invincible_timer -= delta_time
+        # Draw player with animation
+        color = BLUE
+        if self.invincible > 0 and self.invincible % 10 < 5:
+            color = LIGHT_GRAY  # Flashing effect when invincible
         
-        # Update physics
-        self.physics_engine.update()
+        # Body
+        body_rect = pygame.Rect(screen_x + 5, self.y + 10, 20, 25)
+        pygame.draw.rect(screen, color, body_rect, border_radius=5)
         
-        # Update enemies
-        for enemy in self.enemy_list:
-            enemy.center_x += enemy.change_x
+        # Head
+        head_x = screen_x + 15
+        head_y = self.y + 5
+        pygame.draw.circle(screen, color, (int(head_x), int(head_y)), 8)
+        
+        # Eyes
+        eye_offset = 2 if self.facing_right else -2
+        pygame.draw.circle(screen, WHITE, (int(head_x + eye_offset), int(head_y)), 2)
+        
+        # Arms animation
+        if self.state == "run":
+            arm_swing = math.sin(self.animation_frame * math.pi / 2) * 5
+            pygame.draw.line(screen, color, (screen_x + 10, self.y + 15), 
+                           (screen_x + 5, self.y + 20 + arm_swing), 3)
+            pygame.draw.line(screen, color, (screen_x + 20, self.y + 15), 
+                           (screen_x + 25, self.y + 20 - arm_swing), 3)
+        elif self.state == "jump":
+            pygame.draw.line(screen, color, (screen_x + 10, self.y + 15), 
+                           (screen_x + 5, self.y + 10), 3)
+            pygame.draw.line(screen, color, (screen_x + 20, self.y + 15), 
+                           (screen_x + 25, self.y + 10), 3)
+        else:
+            pygame.draw.line(screen, color, (screen_x + 10, self.y + 15), 
+                           (screen_x + 7, self.y + 22), 3)
+            pygame.draw.line(screen, color, (screen_x + 20, self.y + 15), 
+                           (screen_x + 23, self.y + 22), 3)
+        
+        # Legs animation
+        if self.state == "run":
+            leg_swing = math.sin(self.animation_frame * math.pi / 2) * 6
+            pygame.draw.line(screen, color, (screen_x + 12, self.y + 35), 
+                           (screen_x + 10, self.y + 42 + leg_swing), 3)
+            pygame.draw.line(screen, color, (screen_x + 18, self.y + 35), 
+                           (screen_x + 20, self.y + 42 - leg_swing), 3)
+        elif self.state == "jump":
+            pygame.draw.line(screen, color, (screen_x + 12, self.y + 35), 
+                           (screen_x + 8, self.y + 38), 3)
+            pygame.draw.line(screen, color, (screen_x + 18, self.y + 35), 
+                           (screen_x + 22, self.y + 38), 3)
+        else:
+            pygame.draw.line(screen, color, (screen_x + 12, self.y + 35), 
+                           (screen_x + 12, self.y + 42), 3)
+            pygame.draw.line(screen, color, (screen_x + 18, self.y + 35), 
+                           (screen_x + 18, self.y + 42), 3)
+
+
+class Platform:
+    """Static platform"""
+    def __init__(self, x, y, width, height, platform_type="grass"):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.type = platform_type
+        
+    def draw(self, screen, camera_x):
+        screen_x = self.rect.x - camera_x
+        
+        # Skip if off screen (performance optimization)
+        if screen_x + self.rect.width < 0 or screen_x > SCREEN_WIDTH:
+            return
             
-            # Bounce enemies off walls or edges
-            if enemy.left < 0 or enemy.right > 7000:
-                enemy.change_x *= -1
+        rect = pygame.Rect(screen_x, self.rect.y, self.rect.width, self.rect.height)
+        
+        if self.type == "grass":
+            pygame.draw.rect(screen, DARK_GREEN, rect)
+            pygame.draw.rect(screen, GREEN, (rect.x, rect.y, rect.width, 5))
+        elif self.type == "stone":
+            pygame.draw.rect(screen, DARK_GRAY, rect)
+            for i in range(0, self.rect.width, 20):
+                pygame.draw.rect(screen, LIGHT_GRAY, (rect.x + i, rect.y, 18, self.rect.height), 1)
+        else:
+            pygame.draw.rect(screen, BROWN, rect)
+
+
+class Coin:
+    """Collectible coin"""
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.width = 20
+        self.height = 20
+        self.collected = False
+        self.bob_offset = 0
+        self.bob_speed = 0.1
+        self.rotation = 0
+        
+    def update(self):
+        self.bob_offset = math.sin(self.rotation) * 5
+        self.rotation += self.bob_speed
+        
+    def check_collision(self, player):
+        coin_rect = pygame.Rect(self.x, self.y + self.bob_offset, self.width, self.height)
+        player_rect = pygame.Rect(player.x, player.y, player.width, player.height)
+        
+        if coin_rect.colliderect(player_rect) and not self.collected:
+            self.collected = True
+            player.score += 10
+            return True
+        return False
+    
+    def draw(self, screen, camera_x):
+        if not self.collected:
+            screen_x = self.x - camera_x
             
-            # Check if enemy hits a wall
-            walls_hit = arcade.check_for_collision_with_list(enemy, self.wall_list)
-            if len(walls_hit) > 1:  # More than just the ground
-                enemy.change_x *= -1
-        
-        # Coin collection
-        coins_hit = arcade.check_for_collision_with_list(
-            self.player_sprite,
-            self.coin_list
-        )
-        for coin in coins_hit:
-            coin.remove_from_sprite_lists()
-            self.score += 10
-            self.coins_collected += 1
-        
-        # Enemy collision (damage)
-        if self.invincible_timer <= 0:
-            enemies_hit = arcade.check_for_collision_with_list(
-                self.player_sprite,
-                self.enemy_list
-            )
-            if enemies_hit:
-                damage = 5 if self.difficulty == EASY else 10 if self.difficulty == MEDIUM else 15
-                self.player_health -= damage
-                self.invincible_timer = 1.0  # 1 second invincibility
+            # Skip if off screen (performance optimization)
+            if screen_x < -30 or screen_x > SCREEN_WIDTH + 30:
+                return
                 
-                if self.player_health <= 0:
-                    return GAME_OVER
+            y = self.y + self.bob_offset
+            
+            # Draw coin with rotation effect
+            scale = abs(math.cos(self.rotation))
+            width = int(self.width * scale)
+            if width < 2:
+                width = 2
+            
+            # Outer circle
+            pygame.draw.ellipse(screen, GOLD, (screen_x + (self.width - width) // 2, 
+                                                y, width, self.height))
+            # Inner circle
+            if width > 8:
+                pygame.draw.ellipse(screen, YELLOW, (screen_x + (self.width - width) // 2 + 3, 
+                                                     y + 3, width - 6, self.height - 6))
+
+
+class Enemy:
+    """Enemy that patrols and damages player"""
+    def __init__(self, x, y, patrol_distance):
+        self.x = x
+        self.y = y
+        self.width = 30
+        self.height = 30
+        self.start_x = x
+        self.patrol_distance = patrol_distance
+        self.speed = 2
+        self.direction = 1
+        self.damage = 20
+        self.animation_frame = 0
         
-        # Check win condition
-        end_goal_hit = arcade.check_for_collision_with_list(
-            self.player_sprite,
-            self.end_goal_list
-        )
-        if end_goal_hit and self.coins_collected >= self.total_coins:
-            return GAME_WIN
+        # Cache rect for performance
+        self.rect = pygame.Rect(x, y, self.width, self.height)
+        
+    def update(self, platforms):
+        # Move back and forth
+        self.x += self.speed * self.direction
+        
+        # Turn around at patrol limits
+        if self.x > self.start_x + self.patrol_distance:
+            self.direction = -1
+        elif self.x < self.start_x:
+            self.direction = 1
+        
+        # Animation
+        self.animation_frame += 1
+        
+        # Apply gravity
+        self.y += 5
+        self.rect.x = self.x
+        self.rect.y = self.y
+        
+        # Check platform collisions
+        for platform in platforms:
+            if self.rect.colliderect(platform.rect):
+                if self.y < platform.rect.top:
+                    self.y = platform.rect.top - self.height
+                    self.rect.y = self.y
+                    break
+    
+    def check_collision(self, player):
+        if self.rect.colliderect(player.rect):
+            player.take_damage(self.damage)
+            return True
+        return False
+    
+    def draw(self, screen, camera_x):
+        screen_x = self.x - camera_x
+        
+        # Skip if off screen (performance optimization)
+        if screen_x < -50 or screen_x > SCREEN_WIDTH + 50:
+            return
+        
+        # Body
+        body_color = RED
+        pygame.draw.rect(screen, body_color, (screen_x, self.y, self.width, self.height), 
+                        border_radius=5)
+        
+        # Eyes
+        eye_offset = math.sin(self.animation_frame * 0.1) * 2
+        pygame.draw.circle(screen, YELLOW, (int(screen_x + 10), int(self.y + 10 + eye_offset)), 3)
+        pygame.draw.circle(screen, YELLOW, (int(screen_x + 20), int(self.y + 10 - eye_offset)), 3)
+        
+        # Spikes
+        for i in range(3):
+            spike_x = screen_x + 5 + i * 10
+            points = [(spike_x, self.y), (spike_x + 5, self.y - 5), (spike_x + 10, self.y)]
+            pygame.draw.polygon(screen, ORANGE, points)
+
+
+class Level:
+    """Level class containing all level data"""
+    def __init__(self, level_number):
+        self.level_number = level_number
+        self.platforms = []
+        self.coins = []
+        self.enemies = []
+        self.width = 3000  # Level width
+        self.goal_x = self.width - 100
+        self.spawn_x = 100
+        self.spawn_y = 300
+        
+        self.generate_level()
+    
+    def generate_level(self):
+        """Generate level based on difficulty"""
+        # Ground
+        self.platforms.append(Platform(0, SCREEN_HEIGHT - 40, self.width, 40, "grass"))
+        
+        if self.level_number == 1:
+            # Level 1 - Easy
+            # Platforms
+            self.platforms.append(Platform(200, 450, 150, 20, "grass"))
+            self.platforms.append(Platform(400, 380, 150, 20, "grass"))
+            self.platforms.append(Platform(600, 320, 150, 20, "grass"))
+            self.platforms.append(Platform(850, 400, 200, 20, "grass"))
+            self.platforms.append(Platform(1100, 350, 150, 20, "grass"))
+            self.platforms.append(Platform(1350, 300, 150, 20, "grass"))
+            self.platforms.append(Platform(1600, 400, 200, 20, "stone"))
+            self.platforms.append(Platform(1900, 350, 150, 20, "grass"))
+            self.platforms.append(Platform(2150, 400, 150, 20, "grass"))
+            self.platforms.append(Platform(2400, 350, 200, 20, "grass"))
+            
+            # Coins - placed above platforms so they're reachable
+            # Coins on ground level
+            for i in range(3):
+                self.coins.append(Coin(100 + i * 80, SCREEN_HEIGHT - 70))
+            # Coins above platforms (30 pixels above platform surface)
+            self.coins.append(Coin(250, 450 - 30))   # Above platform at y=450
+            self.coins.append(Coin(450, 380 - 30))   # Above platform at y=380
+            self.coins.append(Coin(650, 320 - 30))   # Above platform at y=320
+            self.coins.append(Coin(900, 400 - 30))   # Above platform at y=400
+            self.coins.append(Coin(1150, 350 - 30))  # Above platform at y=350
+            self.coins.append(Coin(1400, 300 - 30))  # Above platform at y=300
+            self.coins.append(Coin(1650, 400 - 30))  # Above platform at y=400
+            self.coins.append(Coin(1950, 350 - 30))  # Above platform at y=350
+            self.coins.append(Coin(2200, 400 - 30))  # Above platform at y=400
+            self.coins.append(Coin(2450, 350 - 30))  # Above platform at y=350
+            
+            # Enemies
+            self.enemies.append(Enemy(850, 350, 150))
+            self.enemies.append(Enemy(1600, 350, 180))
+            
+        elif self.level_number == 2:
+            # Level 2 - Medium
+            # More complex platforms
+            self.platforms.append(Platform(150, 480, 100, 20, "stone"))
+            self.platforms.append(Platform(300, 420, 100, 20, "stone"))
+            self.platforms.append(Platform(450, 360, 100, 20, "stone"))
+            self.platforms.append(Platform(650, 400, 150, 20, "grass"))
+            self.platforms.append(Platform(900, 320, 120, 20, "stone"))
+            self.platforms.append(Platform(1100, 380, 150, 20, "grass"))
+            self.platforms.append(Platform(1350, 300, 100, 20, "stone"))
+            self.platforms.append(Platform(1550, 380, 150, 20, "grass"))
+            self.platforms.append(Platform(1800, 320, 120, 20, "stone"))
+            self.platforms.append(Platform(2000, 400, 100, 20, "grass"))
+            self.platforms.append(Platform(2200, 350, 150, 20, "stone"))
+            self.platforms.append(Platform(2450, 300, 120, 20, "grass"))
+            self.platforms.append(Platform(2650, 380, 150, 20, "stone"))
+            
+            # Coins - placed above platforms so they're reachable
+            # Coins on ground
+            for i in range(2):
+                self.coins.append(Coin(50 + i * 60, SCREEN_HEIGHT - 70))
+            # Coins above platforms
+            self.coins.append(Coin(180, 480 - 30))   # Above platform at y=480
+            self.coins.append(Coin(330, 420 - 30))   # Above platform at y=420
+            self.coins.append(Coin(480, 360 - 30))   # Above platform at y=360
+            self.coins.append(Coin(700, 400 - 30))   # Above platform at y=400
+            self.coins.append(Coin(940, 320 - 30))   # Above platform at y=320
+            self.coins.append(Coin(1150, 380 - 30))  # Above platform at y=380
+            self.coins.append(Coin(1380, 300 - 30))  # Above platform at y=300
+            self.coins.append(Coin(1600, 380 - 30))  # Above platform at y=380
+            self.coins.append(Coin(1840, 320 - 30))  # Above platform at y=320
+            self.coins.append(Coin(2030, 400 - 30))  # Above platform at y=400
+            self.coins.append(Coin(2250, 350 - 30))  # Above platform at y=350
+            self.coins.append(Coin(2490, 300 - 30))  # Above platform at y=300
+            self.coins.append(Coin(2700, 380 - 30))  # Above platform at y=380
+            
+            # More enemies
+            self.enemies.append(Enemy(650, 350, 120))
+            self.enemies.append(Enemy(1100, 330, 130))
+            self.enemies.append(Enemy(1550, 330, 140))
+            self.enemies.append(Enemy(2200, 300, 140))
+            
+        else:
+            # Level 3 - Hard
+            # Complex jumping required
+            self.platforms.append(Platform(120, 500, 80, 20, "stone"))
+            self.platforms.append(Platform(250, 450, 80, 20, "stone"))
+            self.platforms.append(Platform(380, 400, 80, 20, "stone"))
+            self.platforms.append(Platform(520, 350, 80, 20, "stone"))
+            self.platforms.append(Platform(700, 300, 120, 20, "grass"))
+            self.platforms.append(Platform(900, 380, 100, 20, "stone"))
+            self.platforms.append(Platform(1080, 320, 100, 20, "stone"))
+            self.platforms.append(Platform(1260, 380, 100, 20, "grass"))
+            self.platforms.append(Platform(1450, 300, 80, 20, "stone"))
+            self.platforms.append(Platform(1620, 350, 100, 20, "stone"))
+            self.platforms.append(Platform(1800, 280, 120, 20, "grass"))
+            self.platforms.append(Platform(2000, 350, 100, 20, "stone"))
+            self.platforms.append(Platform(2180, 300, 100, 20, "stone"))
+            self.platforms.append(Platform(2360, 380, 100, 20, "grass"))
+            self.platforms.append(Platform(2550, 320, 120, 20, "stone"))
+            self.platforms.append(Platform(2750, 380, 150, 20, "grass"))
+            
+            # Coins - placed above platforms so they're reachable
+            # Coins on ground at start
+            for i in range(2):
+                self.coins.append(Coin(30 + i * 50, SCREEN_HEIGHT - 70))
+            # Coins above platforms
+            self.coins.append(Coin(140, 500 - 30))   # Above platform at y=500
+            self.coins.append(Coin(270, 450 - 30))   # Above platform at y=450
+            self.coins.append(Coin(400, 400 - 30))   # Above platform at y=400
+            self.coins.append(Coin(540, 350 - 30))   # Above platform at y=350
+            self.coins.append(Coin(740, 300 - 30))   # Above platform at y=300
+            self.coins.append(Coin(930, 380 - 30))   # Above platform at y=380
+            self.coins.append(Coin(1110, 320 - 30))  # Above platform at y=320
+            self.coins.append(Coin(1290, 380 - 30))  # Above platform at y=380
+            self.coins.append(Coin(1470, 300 - 30))  # Above platform at y=300
+            self.coins.append(Coin(1650, 350 - 30))  # Above platform at y=350
+            self.coins.append(Coin(1840, 280 - 30))  # Above platform at y=280
+            self.coins.append(Coin(2030, 350 - 30))  # Above platform at y=350
+            self.coins.append(Coin(2210, 300 - 30))  # Above platform at y=300
+            self.coins.append(Coin(2390, 380 - 30))  # Above platform at y=380
+            self.coins.append(Coin(2590, 320 - 30))  # Above platform at y=320
+            self.coins.append(Coin(2800, 380 - 30))  # Above platform at y=380
+            
+            # Many enemies
+            self.enemies.append(Enemy(700, 250, 110))
+            self.enemies.append(Enemy(1080, 270, 90))
+            self.enemies.append(Enemy(1450, 250, 70))
+            self.enemies.append(Enemy(1800, 230, 110))
+            self.enemies.append(Enemy(2180, 250, 90))
+            self.enemies.append(Enemy(2550, 270, 110))
+
+
+class Game:
+    """Main game class"""
+    def __init__(self):
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("Ultimate Platformer Adventure")
+        self.clock = pygame.time.Clock()
+        self.running = True
+        self.state = GameState.MENU
+        
+        # Game objects
+        self.player = None
+        self.current_level = 1
+        self.level = None
+        self.camera_x = 0
+        self.particles = []
+        
+        # Fonts
+        self.title_font = pygame.font.Font(None, 80)
+        self.font = pygame.font.Font(None, 36)
+        self.small_font = pygame.font.Font(None, 24)
+        
+        # Menu selection
+        self.menu_selection = 0
+        self.menu_options = ["Start Game", "Instructions", "Quit"]
+        self.show_instructions = False
+    
+    def start_level(self, level_number):
+        """Start a specific level"""
+        self.current_level = level_number
+        self.level = Level(level_number)
+        self.player = Player(self.level.spawn_x, self.level.spawn_y)
+        self.camera_x = 0
+        self.particles = []
+        self.state = GameState.PLAYING
+    
+    def update_camera(self):
+        """Update camera to follow player"""
+        # Keep player centered
+        target_x = self.player.x - SCREEN_WIDTH // 3
+        
+        # Smooth camera movement
+        self.camera_x += (target_x - self.camera_x) * 0.1
+        
+        # Keep camera in bounds
+        if self.camera_x < 0:
+            self.camera_x = 0
+        if self.camera_x > self.level.width - SCREEN_WIDTH:
+            self.camera_x = self.level.width - SCREEN_WIDTH
+    
+    def create_particles(self, x, y, color, count=10):
+        """Create particle effects"""
+        for _ in range(count):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(2, 6)
+            velocity = (math.cos(angle) * speed, math.sin(angle) * speed - 3)
+            self.particles.append(Particle(x, y, color, velocity))
+    
+    def handle_menu_input(self, event):
+        """Handle menu input"""
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_UP:
+                self.menu_selection = (self.menu_selection - 1) % len(self.menu_options)
+            elif event.key == pygame.K_DOWN:
+                self.menu_selection = (self.menu_selection + 1) % len(self.menu_options)
+            elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                if self.menu_selection == 0:  # Start Game
+                    self.start_level(1)
+                elif self.menu_selection == 1:  # Instructions
+                    self.show_instructions = not self.show_instructions
+                elif self.menu_selection == 2:  # Quit
+                    self.running = False
+            elif event.key == pygame.K_ESCAPE:
+                if self.show_instructions:
+                    self.show_instructions = False
+    
+    def handle_game_input(self):
+        """Handle game input"""
+        keys = pygame.key.get_pressed()
+        
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            self.player.move_left()
+        elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            self.player.move_right()
+        else:
+            self.player.stop_horizontal()
+        
+        if keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]:
+            self.player.jump()
+    
+    def update_game(self):
+        """Update game state"""
+        # Update player
+        self.player.update(self.level.platforms)
         
         # Update camera
-        self.center_camera_on_player()
+        self.update_camera()
         
-        # Check if player falls off
-        if self.player_sprite.center_y < -100:
-            self.player_health = 0
-            return GAME_OVER
+        # Update coins
+        for coin in self.level.coins:
+            coin.update()
+            if coin.check_collision(self.player):
+                self.create_particles(coin.x + 10, coin.y + 10, GOLD, 15)
         
-        return GAME_PLAY
+        # Update enemies
+        for enemy in self.level.enemies:
+            enemy.update(self.level.platforms)
+            if enemy.check_collision(self.player):
+                self.create_particles(self.player.x + 15, self.player.y + 20, RED, 10)
+        
+        # Update particles (optimized - use list comprehension instead of remove in loop)
+        for particle in self.particles:
+            particle.update()
+        self.particles = [p for p in self.particles if p.life > 0]
+        
+        # Check win condition
+        if self.player.x >= self.level.goal_x:
+            all_coins_collected = all(coin.collected for coin in self.level.coins)
+            if all_coins_collected:
+                self.state = GameState.LEVEL_COMPLETE
+        
+        # Check game over
+        if self.player.health <= 0:
+            self.state = GameState.GAME_OVER
     
-    def center_camera_on_player(self):
-        """Center camera on player"""
-        # Center camera on player with smooth following
-        # Position player at 1/3 of screen width (left side) to see ahead
-        target_x = self.player_sprite.center_x - SCREEN_WIDTH / 3
-        target_y = self.player_sprite.center_y - SCREEN_HEIGHT * 2 / 3
+    def draw_menu(self):
+        """Draw main menu"""
+        self.screen.fill(SKY_BLUE)
         
-        # Don't let camera go below 0
-        if target_x < 0:
-            target_x = 0
-        if target_y < 0:
-            target_y = 0
-        
-        # Set camera position
-        self.camera.position = (target_x, target_y)
+        if self.show_instructions:
+            # Draw instructions
+            title = self.title_font.render("Instructions", True, BLACK)
+            title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 80))
+            self.screen.blit(title, title_rect)
+            
+            instructions = [
+                "Controls:",
+                "  Arrow Keys / A,D - Move Left/Right",
+                "  Space / W / Up - Jump",
+                "",
+                "Objective:",
+                "  Collect ALL coins to complete the level",
+                "  Avoid enemies - they damage you!",
+                "  Reach the goal at the end",
+                "",
+                "Features:",
+                "  3 Levels with increasing difficulty",
+                "  Health system - don't let it reach 0!",
+                "  Score points by collecting coins",
+                "",
+                "Press ESC to return to menu"
+            ]
+            
+            y = 150
+            for line in instructions:
+                text = self.small_font.render(line, True, BLACK)
+                self.screen.blit(text, (100, y))
+                y += 30
+        else:
+            # Draw title with shadow
+            title_shadow = self.title_font.render("PLATFORMER", True, DARK_GRAY)
+            title = self.title_font.render("PLATFORMER", True, BLUE)
+            title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 100))
+            self.screen.blit(title_shadow, (title_rect.x + 3, title_rect.y + 3))
+            self.screen.blit(title, title_rect)
+            
+            subtitle = self.font.render("ADVENTURE", True, ORANGE)
+            subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 160))
+            self.screen.blit(subtitle, subtitle_rect)
+            
+            # Draw menu options
+            for i, option in enumerate(self.menu_options):
+                color = YELLOW if i == self.menu_selection else WHITE
+                text = self.font.render(option, True, color)
+                text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, 300 + i * 60))
+                
+                if i == self.menu_selection:
+                    # Draw selection indicator
+                    pygame.draw.polygon(self.screen, YELLOW, [
+                        (text_rect.left - 30, text_rect.centery - 10),
+                        (text_rect.left - 30, text_rect.centery + 10),
+                        (text_rect.left - 15, text_rect.centery)
+                    ])
+                
+                self.screen.blit(text, text_rect)
+            
+            # Draw controls hint
+            hint = self.small_font.render("Use Arrow Keys and Enter", True, LIGHT_GRAY)
+            hint_rect = hint.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+            self.screen.blit(hint, hint_rect)
     
-    def draw(self):
-        """Draw the game"""
+    def draw_game(self):
+        """Draw game screen"""
+        # Sky background
+        self.screen.fill(SKY_BLUE)
         
-        # Draw game world with camera
-        self.camera.use()
+        # Draw platforms
+        for platform in self.level.platforms:
+            platform.draw(self.screen, self.camera_x)
         
-        self.wall_list.draw()
-        self.coin_list.draw()
-        self.enemy_list.draw()
-        self.end_goal_list.draw()
+        # Draw coins
+        for coin in self.level.coins:
+            coin.draw(self.screen, self.camera_x)
         
-        # Flash player when invincible
-        if self.invincible_timer <= 0 or int(self.invincible_timer * 10) % 2 == 0:
-            self.player_list.draw()
+        # Draw enemies
+        for enemy in self.level.enemies:
+            enemy.draw(self.screen, self.camera_x)
         
-        # Draw GUI with fixed camera
-        self.gui_camera.use()
+        # Draw particles
+        for particle in self.particles:
+            particle.draw(self.screen)
         
+        # Draw player
+        self.player.draw(self.screen, self.camera_x)
+        
+        # Draw goal
+        goal_x = self.level.goal_x - self.camera_x
+        if goal_x >= -100 and goal_x <= SCREEN_WIDTH + 100:
+            pygame.draw.rect(self.screen, GOLD, (goal_x, SCREEN_HEIGHT - 140, 50, 100))
+            pygame.draw.polygon(self.screen, YELLOW, [
+                (goal_x + 50, SCREEN_HEIGHT - 140),
+                (goal_x + 50, SCREEN_HEIGHT - 100),
+                (goal_x + 80, SCREEN_HEIGHT - 120)
+            ])
+            flag_text = self.small_font.render("GOAL", True, BLACK)
+            self.screen.blit(flag_text, (goal_x + 5, SCREEN_HEIGHT - 170))
+        
+        # Draw HUD
+        self.draw_hud()
+    
+    def draw_hud(self):
+        """Draw heads-up display"""
         # Health bar
-        health_width = 200
-        health_height = 20
-        health_x = 20
-        health_y = SCREEN_HEIGHT - 40
+        bar_width = 200
+        bar_height = 20
+        bar_x = 20
+        bar_y = 20
         
-        # Background (red)
-        arcade.draw_lrbt_rectangle_filled(
-            health_x, health_x + health_width,
-            health_y - health_height / 2, health_y + health_height / 2,
-            arcade.color.DARK_RED
-        )
+        # Background
+        pygame.draw.rect(self.screen, DARK_GRAY, (bar_x - 2, bar_y - 2, bar_width + 4, bar_height + 4))
+        pygame.draw.rect(self.screen, BLACK, (bar_x, bar_y, bar_width, bar_height))
         
-        # Current health (green)
-        current_health_width = (self.player_health / 100) * health_width
-        arcade.draw_lrbt_rectangle_filled(
-            health_x, health_x + current_health_width,
-            health_y - health_height / 2, health_y + health_height / 2,
-            arcade.color.GREEN
-        )
+        # Health
+        health_width = int((self.player.health / self.player.max_health) * bar_width)
+        health_color = GREEN if self.player.health > 50 else (ORANGE if self.player.health > 25 else RED)
+        pygame.draw.rect(self.screen, health_color, (bar_x, bar_y, health_width, bar_height))
         
         # Health text
-        arcade.draw_text(
-            f"Health: {max(0, self.player_health)}",
-            health_x + health_width + 10, health_y - 8,
-            arcade.color.WHITE, 18, bold=True
-        )
+        health_text = self.small_font.render(f"Health: {self.player.health}/{self.player.max_health}", 
+                                             True, WHITE)
+        self.screen.blit(health_text, (bar_x + 5, bar_y + 1))
         
         # Score
-        arcade.draw_text(
-            f"Score: {self.score}",
-            20, SCREEN_HEIGHT - 80,
-            arcade.color.WHITE, 20, bold=True
-        )
+        score_text = self.font.render(f"Score: {self.player.score}", True, YELLOW)
+        self.screen.blit(score_text, (20, 50))
+        
+        # Level
+        level_text = self.font.render(f"Level: {self.current_level}", True, WHITE)
+        self.screen.blit(level_text, (SCREEN_WIDTH - 150, 20))
         
         # Coins collected
-        arcade.draw_text(
-            f"Coins: {self.coins_collected}/{self.total_coins}",
-            20, SCREEN_HEIGHT - 110,
-            arcade.color.YELLOW, 20, bold=True
+        total_coins = len(self.level.coins)
+        collected_coins = sum(1 for coin in self.level.coins if coin.collected)
+        coins_text = self.small_font.render(f"Coins: {collected_coins}/{total_coins}", True, GOLD)
+        self.screen.blit(coins_text, (SCREEN_WIDTH - 150, 50))
+        
+        # Instructions
+        if self.player.x < 300:  # Show at start
+            hint = self.small_font.render("Arrow Keys to move, Space to jump", True, WHITE)
+            hint_rect = hint.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 30))
+            
+            # Background for readability
+            bg_rect = pygame.Rect(hint_rect.x - 10, hint_rect.y - 5, 
+                                 hint_rect.width + 20, hint_rect.height + 10)
+            s = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+            s.fill((0, 0, 0, 180))
+            self.screen.blit(s, bg_rect)
+            
+            self.screen.blit(hint, hint_rect)
+    
+    def draw_game_over(self):
+        """Draw game over screen"""
+        self.screen.fill(DARK_GRAY)
+        
+        # Title
+        title = self.title_font.render("GAME OVER", True, RED)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 150))
+        self.screen.blit(title, title_rect)
+        
+        # Stats
+        score_text = self.font.render(f"Final Score: {self.player.score}", True, YELLOW)
+        score_rect = score_text.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        self.screen.blit(score_text, score_rect)
+        
+        level_text = self.font.render(f"Level Reached: {self.current_level}", True, WHITE)
+        level_rect = level_text.get_rect(center=(SCREEN_WIDTH // 2, 300))
+        self.screen.blit(level_text, level_rect)
+        
+        # Options
+        retry_text = self.font.render("Press R to Retry", True, GREEN)
+        retry_rect = retry_text.get_rect(center=(SCREEN_WIDTH // 2, 400))
+        self.screen.blit(retry_text, retry_rect)
+        
+        menu_text = self.font.render("Press M for Menu", True, BLUE)
+        menu_rect = menu_text.get_rect(center=(SCREEN_WIDTH // 2, 450))
+        self.screen.blit(menu_text, menu_rect)
+    
+    def draw_level_complete(self):
+        """Draw level complete screen"""
+        self.screen.fill(SKY_BLUE)
+        
+        # Title
+        title = self.title_font.render("LEVEL COMPLETE!", True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 150))
+        self.screen.blit(title, title_rect)
+        
+        # Stars based on performance
+        stars = 3
+        if self.player.health < 50:
+            stars = 2
+        if self.player.health < 25:
+            stars = 1
+        
+        # Draw stars
+        star_y = 230
+        for i in range(3):
+            color = GOLD if i < stars else DARK_GRAY
+            star_x = SCREEN_WIDTH // 2 - 60 + i * 60
+            self.draw_star(star_x, star_y, 25, color)
+        
+        # Stats
+        score_text = self.font.render(f"Score: {self.player.score}", True, BLACK)
+        score_rect = score_text.get_rect(center=(SCREEN_WIDTH // 2, 320))
+        self.screen.blit(score_text, score_rect)
+        
+        health_text = self.font.render(f"Health Remaining: {self.player.health}%", True, BLACK)
+        health_rect = health_text.get_rect(center=(SCREEN_WIDTH // 2, 370))
+        self.screen.blit(health_text, health_rect)
+        
+        # Options
+        if self.current_level < 3:
+            next_text = self.font.render("Press SPACE for Next Level", True, BLUE)
+            next_rect = next_text.get_rect(center=(SCREEN_WIDTH // 2, 450))
+            self.screen.blit(next_text, next_rect)
+        else:
+            win_text = self.title_font.render("YOU WIN!", True, GOLD)
+            win_rect = win_text.get_rect(center=(SCREEN_WIDTH // 2, 450))
+            self.screen.blit(win_text, win_rect)
+        
+        menu_text = self.small_font.render("Press M for Menu", True, DARK_GRAY)
+        menu_rect = menu_text.get_rect(center=(SCREEN_WIDTH // 2, 520))
+        self.screen.blit(menu_text, menu_rect)
+    
+    def draw_paused(self):
+        """Draw pause screen overlay"""
+        # Draw the game in background
+        self.draw_game()
+        
+        # Dark overlay
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Pause title
+        title = self.title_font.render("PAUSED", True, WHITE)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 200))
+        self.screen.blit(title, title_rect)
+        
+        # Options
+        options = [
+            ("Press ESC or P to Resume", GREEN),
+            ("Press R to Restart Level", YELLOW),
+            ("Press M for Main Menu", BLUE)
+        ]
+        
+        y = 320
+        for text, color in options:
+            rendered = self.font.render(text, True, color)
+            text_rect = rendered.get_rect(center=(SCREEN_WIDTH // 2, y))
+            self.screen.blit(rendered, text_rect)
+            y += 50
+        
+        # Current stats
+        stats_text = self.small_font.render(
+            f"Level {self.current_level} | Score: {self.player.score} | Health: {self.player.health}%",
+            True, LIGHT_GRAY
         )
-        
-        # Instructions if near end
-        if self.player_sprite.center_x > 6500:
-            if self.coins_collected < self.total_coins:
-                arcade.draw_text(
-                    f"Collect all coins first! ({self.coins_collected}/{self.total_coins})",
-                    SCREEN_WIDTH / 2, SCREEN_HEIGHT - 100,
-                    arcade.color.RED, 24,
-                    anchor_x="center", bold=True
-                )
+        stats_rect = stats_text.get_rect(center=(SCREEN_WIDTH // 2, 500))
+        self.screen.blit(stats_text, stats_rect)
+    
+    def draw_star(self, x, y, size, color):
+        """Draw a star shape"""
+        points = []
+        for i in range(10):
+            angle = math.pi * 2 * i / 10 - math.pi / 2
+            if i % 2 == 0:
+                r = size
             else:
-                arcade.draw_text(
-                    "Reach the flag to win!",
-                    SCREEN_WIDTH / 2, SCREEN_HEIGHT - 100,
-                    arcade.color.GREEN, 24,
-                    anchor_x="center", bold=True
-                )
+                r = size // 2
+            px = x + math.cos(angle) * r
+            py = y + math.sin(angle) * r
+            points.append((px, py))
+        pygame.draw.polygon(self.screen, color, points)
     
-    def on_key_press(self, key):
-        """Handle key presses"""
-        if key == arcade.key.UP:
-            if self.physics_engine.can_jump():
-                self.player_sprite.change_y = PLAYER_JUMP_SPEED
-                # ANIMATION PLACEHOLDER: Switch to jump animation
-        elif key == arcade.key.LEFT:
-            self.player_sprite.change_x = -PLAYER_MOVE_SPEED
-            # ANIMATION PLACEHOLDER: Switch to walk left animation
-        elif key == arcade.key.RIGHT:
-            self.player_sprite.change_x = PLAYER_MOVE_SPEED
-            # ANIMATION PLACEHOLDER: Switch to walk right animation
-    
-    def on_key_release(self, key):
-        """Handle key releases"""
-        if key == arcade.key.LEFT or key == arcade.key.RIGHT:
-            self.player_sprite.change_x = 0
-            # ANIMATION PLACEHOLDER: Switch to idle animation
-
-
-class PlatformerGame(arcade.Window):
-    """Main game window"""
-    
-    def __init__(self):
-        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
-        arcade.set_background_color(arcade.color.SKY_BLUE)
+    def run(self):
+        """Main game loop"""
+        while self.running:
+            # Handle events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                
+                if self.state == GameState.MENU:
+                    self.handle_menu_input(event)
+                
+                elif self.state == GameState.GAME_OVER:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_r:
+                            self.start_level(self.current_level)
+                        elif event.key == pygame.K_m:
+                            self.state = GameState.MENU
+                
+                elif self.state == GameState.LEVEL_COMPLETE:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_SPACE and self.current_level < 3:
+                            self.start_level(self.current_level + 1)
+                        elif event.key == pygame.K_m:
+                            self.state = GameState.MENU
+                
+                elif self.state == GameState.PAUSED:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE or event.key == pygame.K_p:
+                            self.state = GameState.PLAYING
+                        elif event.key == pygame.K_m:
+                            self.state = GameState.MENU
+                        elif event.key == pygame.K_r:
+                            self.start_level(self.current_level)
+                
+                elif self.state == GameState.PLAYING:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE or event.key == pygame.K_p:
+                            self.state = GameState.PAUSED
+                    # Handle jump release for variable jump height
+                    elif event.type == pygame.KEYUP:
+                        if event.key in (pygame.K_SPACE, pygame.K_UP, pygame.K_w):
+                            self.player.release_jump()
+            
+            # Update
+            if self.state == GameState.PLAYING:
+                self.handle_game_input()
+                self.update_game()
+            
+            # Draw
+            if self.state == GameState.MENU:
+                self.draw_menu()
+            elif self.state == GameState.PLAYING:
+                self.draw_game()
+            elif self.state == GameState.GAME_OVER:
+                self.draw_game_over()
+            elif self.state == GameState.LEVEL_COMPLETE:
+                self.draw_level_complete()
+            elif self.state == GameState.PAUSED:
+                self.draw_paused()
+            
+            # Update display
+            pygame.display.flip()
+            self.clock.tick(FPS)
         
-        self.game_state = MENU
-        self.menu_view = MenuView(self)
-        self.game_view = None
-        self.game_over_view = None
-    
-    def setup(self):
-        """Setup the game"""
-        self.game_state = MENU
-        self.menu_view = MenuView(self)
-    
-    def on_draw(self):
-        """Render the screen"""
-        self.clear()
-        
-        if self.game_state == MENU:
-            self.menu_view.draw()
-        elif self.game_state == GAME_PLAY:
-            if self.game_view:
-                self.game_view.draw()
-        elif self.game_state in [GAME_OVER, GAME_WIN]:
-            if self.game_over_view:
-                self.game_over_view.draw()
-    
-    def on_update(self, delta_time):
-        """Update game logic"""
-        if self.game_state == GAME_PLAY and self.game_view:
-            result = self.game_view.update(delta_time)
-            if result == GAME_OVER:
-                self.game_state = GAME_OVER
-                self.game_over_view = GameOverView(
-                    self,
-                    won=False,
-                    score=self.game_view.score,
-                    health=self.game_view.player_health
-                )
-            elif result == GAME_WIN:
-                self.game_state = GAME_WIN
-                self.game_over_view = GameOverView(
-                    self,
-                    won=True,
-                    score=self.game_view.score,
-                    health=self.game_view.player_health
-                )
-    
-    def on_key_press(self, key, modifiers):
-        """Handle key presses"""
-        if self.game_state == MENU:
-            if key == arcade.key.NUM_1:
-                self.menu_view.selected_difficulty = EASY
-            elif key == arcade.key.NUM_2:
-                self.menu_view.selected_difficulty = MEDIUM
-            elif key == arcade.key.NUM_3:
-                self.menu_view.selected_difficulty = HARD
-            elif key == arcade.key.ENTER:
-                self.game_state = GAME_PLAY
-                self.game_view = GamePlayView(self, self.menu_view.selected_difficulty)
-        
-        elif self.game_state == GAME_PLAY:
-            if self.game_view:
-                self.game_view.on_key_press(key)
-        
-        elif self.game_state in [GAME_OVER, GAME_WIN]:
-            if key == arcade.key.R:
-                # Restart game
-                self.game_state = GAME_PLAY
-                self.game_view = GamePlayView(self, self.menu_view.selected_difficulty)
-            elif key == arcade.key.ESCAPE:
-                # Back to menu
-                self.setup()
-    
-    def on_key_release(self, key, modifiers):
-        """Handle key releases"""
-        if self.game_state == GAME_PLAY and self.game_view:
-            self.game_view.on_key_release(key)
-
-
-def main():
-    """Main function"""
-    game = PlatformerGame()
-    game.setup()
-    arcade.run()
+        pygame.quit()
 
 
 if __name__ == "__main__":
-    main()
+    game = Game()
+    game.run()
